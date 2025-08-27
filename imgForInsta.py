@@ -24,7 +24,7 @@ def make_square(image, margin_color=(255, 255, 255), extra_margin=100):
     
     return padded_image
 
-def save_square_image(input_file, output_dir, max_size_mb=8):
+def save_square_image(input_file, output_dir, max_size_mb=9):
     # 画像を読み込む
     image = cv2.imread(input_file)
     
@@ -40,18 +40,14 @@ def save_square_image(input_file, output_dir, max_size_mb=8):
     file_name = os.path.basename(input_file)
     output_path = os.path.join(output_dir, file_name)
     
-    # 加工した画像を一時保存
-    temp_output_path = output_path + ".temp.jpg"
-    cv2.imwrite(temp_output_path, square_image)
-    
-    # 画像サイズをチェックし、8MBを超える場合は圧縮
-    file_size_mb = os.path.getsize(temp_output_path) / (1024 * 1024)
-    if file_size_mb > max_size_mb:
-        compression_quality = int(100 * max_size_mb / file_size_mb)
-        cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
-        os.remove(temp_output_path)
-    else:
-        os.rename(temp_output_path, output_path)
+    # 最初は高めの品質から保存
+    quality = 95
+    cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+
+    # サイズが収まるまで繰り返し
+    while os.path.getsize(output_path) / (1024*1024) > max_size_mb:
+        quality -= 3
+        cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
