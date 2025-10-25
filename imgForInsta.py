@@ -24,7 +24,7 @@ def make_square(image, margin_color=(255, 255, 255), extra_margin=100):
     
     return padded_image
 
-def save_square_image(input_file, output_dir, max_size_mb=9):
+def save_square_image(input_file, output_dir, extra_margin=100, max_size_mb=9):
     # 画像を読み込む
     image = cv2.imread(input_file)
     
@@ -34,7 +34,7 @@ def save_square_image(input_file, output_dir, max_size_mb=9):
         return
     
     # 正方形に加工した画像を取得
-    square_image = make_square(image)
+    square_image = make_square(image, extra_margin=extra_margin)
     
     # 出力先のファイル名を設定
     file_name = os.path.basename(input_file)
@@ -50,14 +50,24 @@ def save_square_image(input_file, output_dir, max_size_mb=9):
         cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
-        print("Usage: python3 imgForInsta.py [<directory_path>]")
+    if len(sys.argv) > 3:
+        print("Usage: python3 imgForInsta.py [<directory_path>] [<margin_size>]")
         sys.exit(1)
 
-    # 指定されたディレクトリを取得
-    if len(sys.argv) == 2:
-        input_dir = sys.argv[1]
-    else:
+    # 指定されたディレクトリとマージンサイズを取得
+    input_dir = None
+    margin_size = 100  # デフォルト値
+
+    if len(sys.argv) >= 2:
+        # 最後の引数が数値の場合はマージンサイズとして扱う
+        if sys.argv[-1].isdigit():
+            margin_size = int(sys.argv[-1])
+            if len(sys.argv) == 3:
+                input_dir = sys.argv[1]
+        else:
+            input_dir = sys.argv[1]
+
+    if input_dir is None:
         # 引数がない場合はスクリプトのディレクトリを使用
         input_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -82,6 +92,6 @@ if __name__ == "__main__":
     # 各画像に対して処理を実行
     for input_file in input_path:
         print(f"Processing file: {input_file}")
-        save_square_image(input_file, output_dir)
+        save_square_image(input_file, output_dir, extra_margin=margin_size)
 
     print(f"Processing completed. Resized images are saved in '{output_dir}'.")
