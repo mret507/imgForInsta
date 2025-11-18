@@ -2,8 +2,25 @@
 import os
 import cv2
 import sys
+import argparse
+import concurrent.futures
+import multiprocessing
+import numpy as np
+from tqdm import tqdm
+from typing import Optional, List, Tuple
 
-def make_square(image, margin_color=(255, 255, 255), extra_margin=100):
+"""
+imgForInsta.py
+
+Usage:
+    python imgForInsta.py [<directory_or_file_path>] [<margin_size>]
+
+If a directory path is given, all JPG/JPEG/PNG files in the directory are processed.
+If a file path is given and it's an image, only that file will be processed.
+If no path is given, the script directory is used.
+"""
+
+def make_square(image: np.ndarray, margin_color: Tuple[int, int, int] = (255, 255, 255), extra_margin: int = 100) -> np.ndarray:
     # 画像のサイズを取得
     height, width = image.shape[:2]
     
@@ -24,74 +41,134 @@ def make_square(image, margin_color=(255, 255, 255), extra_margin=100):
     
     return padded_image
 
-def save_square_image(input_file, output_dir, extra_margin=100, max_size_mb=9):
+def load_image_as_bgr(input_file: str) -> Optional[np.ndarray]:
+    """Load image file into a BGR numpy array suitable for OpenCV.
+
+    Supports JPEG/JPG via OpenCV. Supports HEIF/HEIC via Pillow + pillow_heif if available.
+    Returns None on failure.
+    """
+    ext = os.path.splitext(input_file)[1].lower()
+    if ext in ('.jpg', '.jpeg'):
+        return cv2.imread(input_file)
+
+    if ext in ('.heif', '.heic'):
+        try:
+            from PIL import Image
+            # pillow-heif は Pillow に HEIF オープナーを登録します
+            try:
+                import pillow_heif
+                pillow_heif.register_heif_opener()
+            except Exception:
+                # pillow_heif がインストールされていない場合は pyheif を試す可能性があります
+                pass
+
+            im = Image.open(input_file).convert('RGB')
+            arr = np.array(im)  # RGB（赤・緑・青）
+            # RGB を OpenCV の BGR に変換
+            return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        except Exception as e:
+            print(f"Error: Cannot read HEIF file '{input_file}'. Install 'pillow-heif' or 'pyheif' (error: {e}).")
+            return None
+
+    # サポート外
+    print(f"Error: Unsupported file extension for '{input_file}'. Supported: .jpg/.jpeg/.heif/.heic")
+    return None
+
+
+def save_square_image(input_file: str, output_dir: str, extra_margin: int = 100, max_size_mb: float = 9.0, quality_start: int = 95, quality_min: int = 10) -> None:
     # 画像を読み込む
-    image = cv2.imread(input_file)
-    
+    image: Optional[np.ndarray] = load_image_as_bgr(input_file)
+
     # 画像が正しく読み込まれたか確認
     if image is None:
-        print(f"Error: Failed to load image '{input_file}'. Please check the file path or format.")
+        print(f"Error: Failed to load image '{input_file}'. Skipping.")
         return
-    
+
     # 正方形に加工した画像を取得
-    square_image = make_square(image, extra_margin=extra_margin)
-    
+    # image はここで None でないことが保証される
+    square_image: np.ndarray = make_square(image, extra_margin=extra_margin)
+
     # 出力先のファイル名を設定
-    file_name = os.path.basename(input_file)
-    output_path = os.path.join(output_dir, file_name)
-    
+    base_name = os.path.splitext(os.path.basename(input_file))[0]
+    in_ext = os.path.splitext(input_file)[1].lower()
+    # HEIF を JPEG に変換して保存する（OpenCV の書き出しで HEIF を扱うのは環境依存）
+    if in_ext in ('.heif', '.heic'):
+        out_name = base_name + '.jpg'
+    else:
+        out_name = base_name + in_ext
+
+    output_path = os.path.join(output_dir, out_name)
+
     # 最初は高めの品質から保存
-    quality = 95
+    quality = quality_start
+    # OpenCV は JPEG のみ品質オプションを受け取るため、常に JPEG で保存する
+    # もし拡張子が .jpg/.jpeg 以外でも .jpg にして保存
     cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
-    # サイズが収まるまで繰り返し
+    # サイズが収まるまで繰り返し（品質に下限を設定して無限ループを防ぐ）
     while os.path.getsize(output_path) / (1024*1024) > max_size_mb:
         quality -= 3
+        if quality < quality_min:
+            # これ以上品質を下げられないのでループを抜ける
+            print(f"Warning: Reached minimum quality for '{output_path}', file may still be larger than {max_size_mb}MB.")
+            break
         cv2.imwrite(output_path, square_image, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
 if __name__ == "__main__":
-    if len(sys.argv) > 3:
-        print("Usage: python3 imgForInsta.py [<directory_path>] [<margin_size>]")
+    parser = argparse.ArgumentParser(description="Make square images for Instagram-like posts. Supports JPG/JPEG and HEIF/HEIC (HEIF requires additional libraries).")
+    parser.add_argument('path', nargs='?', default=os.path.dirname(os.path.abspath(__file__)), help='Directory or image file path. Defaults to script directory.')
+    parser.add_argument('-m', '--margin', type=int, default=100, help='Extra margin to add around the image (default: 100)')
+    parser.add_argument('-w', '--workers', type=int, default=max(1, multiprocessing.cpu_count() - 1), help='Number of parallel worker processes (default: cpu_count-1)')
+    parser.add_argument('--max-size', type=float, default=9.0, help='Maximum output file size in MB (default: 9)')
+    parser.add_argument('--quality-min', type=int, default=10, help='Minimum JPEG quality when shrinking (default: 10)')
+    args = parser.parse_args()
+
+    path_arg: str = args.path
+    margin_size: int = args.margin
+    workers: int = args.workers
+    max_size: float = args.max_size
+    quality_min: int = args.quality_min
+
+    # 判定とファイルリスト作成（PNG は除外、HEIF を追加）
+    if os.path.isfile(path_arg):
+        ext = os.path.splitext(path_arg)[1].lower()
+        if ext not in ('.jpg', '.jpeg', '.heif', '.heic'):
+            print(f"Error: The specified file '{path_arg}' is not a supported image (jpg/jpeg/heif/heic).")
+            sys.exit(1)
+
+        input_files: List[str] = [path_arg]
+        output_dir: str = os.path.join(os.path.dirname(path_arg), "square_resized")
+        os.makedirs(output_dir, exist_ok=True)
+
+    elif os.path.isdir(path_arg):
+        input_dir = path_arg
+        exts = ('.jpg', '.jpeg', '.heif', '.heic')
+        input_files: List[str] = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(exts)]
+        if not input_files:
+            print(f"No supported files (jpg/jpeg/heif/heic) found in the directory '{input_dir}'.")
+            sys.exit(1)
+
+        output_dir: str = os.path.join(input_dir, "square_resized")
+        os.makedirs(output_dir, exist_ok=True)
+
+    else:
+        print(f"Error: The specified path '{path_arg}' does not exist.")
         sys.exit(1)
 
-    # 指定されたディレクトリとマージンサイズを取得
-    input_dir = None
-    margin_size = 100  # デフォルト値
+    print(f"Found {len(input_files)} files. Using {workers} worker(s). Output dir: {output_dir}")
 
-    if len(sys.argv) >= 2:
-        # 最後の引数が数値の場合はマージンサイズとして扱う
-        if sys.argv[-1].isdigit():
-            margin_size = int(sys.argv[-1])
-            if len(sys.argv) == 3:
-                input_dir = sys.argv[1]
-        else:
-            input_dir = sys.argv[1]
-
-    if input_dir is None:
-        # 引数がない場合はスクリプトのディレクトリを使用
-        input_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # ディレクトリが存在するか確認
-    if not os.path.isdir(input_dir):
-        print(f"Error: The specified directory '{input_dir}' does not exist.")
-        sys.exit(1)
-
-    # 指定されたディレクトリ内のすべての JPG ファイルを取得
-    input_path = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith('.jpg')]
-
-    if not input_path:
-        print(f"No JPG files found in the directory '{input_dir}'.")
-        sys.exit(1)
-
-    # 出力先のディレクトリを設定
-    output_dir = os.path.join(input_dir, "square_resized")
-
-    # 出力先ディレクトリを作成
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 各画像に対して処理を実行
-    for input_file in input_path:
-        print(f"Processing file: {input_file}")
-        save_square_image(input_file, output_dir, extra_margin=margin_size)
+    # 並列処理
+    if workers <= 1 or len(input_files) == 1:
+        for input_file in tqdm(input_files, desc="Processing", unit="file"):
+            tqdm.write(f"Processing file: {input_file}")
+            save_square_image(input_file, output_dir, extra_margin=margin_size, max_size_mb=max_size, quality_start=95, quality_min=quality_min)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+            futures: List[concurrent.futures.Future] = [ex.submit(save_square_image, f, output_dir, margin_size, max_size, 95, quality_min) for f in input_files]
+            for fut in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing", unit="file"):
+                try:
+                    fut.result()
+                except Exception as e:
+                    tqdm.write(f"Error processing file in worker: {e}")
 
     print(f"Processing completed. Resized images are saved in '{output_dir}'.")
