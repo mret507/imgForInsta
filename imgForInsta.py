@@ -6,6 +6,7 @@ import argparse
 import concurrent.futures
 import multiprocessing
 import numpy as np
+import io
 from tqdm import tqdm
 from typing import Optional, List, Tuple
 
@@ -62,7 +63,25 @@ def load_image_as_bgr(input_file: str) -> Optional[np.ndarray]:
                 # pillow_heif がインストールされていない場合は pyheif を試す可能性があります
                 pass
 
-            im = Image.open(input_file).convert('RGB')
+            im = Image.open(input_file)
+            # ICC プロファイルが埋め込まれている場合は sRGB に変換して色ずれを抑える
+            try:
+                icc = im.info.get('icc_profile')
+                if icc:
+                    try:
+                        from PIL import ImageCms
+                        src_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+                        dst_profile = ImageCms.createProfile('sRGB')
+                        im = ImageCms.profileToProfile(im, src_profile, dst_profile, outputMode='RGB')
+                    except Exception:
+                        # ImageCms が利用できない、またはプロファイル変換に失敗した場合はフォールバック
+                        im = im.convert('RGB')
+                else:
+                    im = im.convert('RGB')
+            except Exception:
+                # 何らかの理由でプロファイル処理が失敗した場合でも画像をRGBに変換して続行
+                im = im.convert('RGB')
+
             arr = np.array(im)  # RGB（赤・緑・青）
             # RGB を OpenCV の BGR に変換
             return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
