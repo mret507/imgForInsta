@@ -9,6 +9,30 @@ Resize and pad images to square (1:1) for posting on the PC version of Instagram
 
 ## Usage
 
+### run.bat (recommended)
+
+After setting up the venv, use `run.bat` for quick execution without manually activating the venv.
+
+```batch
+run.bat [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N]
+```
+
+**Examples:**
+
+- Process a single file:
+
+  ```batch
+  run.bat "C:\path\to\photo.jpg"
+  ```
+
+- Process a directory with a custom margin:
+
+  ```batch
+  run.bat "C:\path\to\images" -m 150
+  ```
+
+### Direct Python execution
+
 ```powershell
 python imgForInsta.py [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N]
 ```
@@ -53,6 +77,7 @@ This project is licensed under the MIT License. See the LICENSE file for details
 
 ## Features
 
+- `run.bat` for easy launch without manual venv activation
 - CLI with argparse (see Usage above)
 - Parallel processing (set workers with `-w`)
 - Progress bar with `tqdm`
