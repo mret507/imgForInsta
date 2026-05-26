@@ -1,6 +1,7 @@
 .venv
 __pycache__
-test_heif*
+*.heif
 *.jpg
 .claude
 CLAUDE.md
+残課題.md
