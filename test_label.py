@@ -57,7 +57,7 @@ def main() -> int:
         print(f'[OK] line1 contains camera/lens: {lines[0]!r}')
 
     line2 = lines[1] if len(lines) > 1 else ''
-    for needle in ('F2.8', '1/250s', 'ISO400'):
+    for needle in ('f/2.8', '1/250s', 'ISO 400'):
         if needle not in line2:
             print(f'[FAIL] line2 missing {needle!r}: {line2!r}')
             failures += 1

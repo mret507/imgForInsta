@@ -7,6 +7,7 @@ Resize and pad images to square (1:1) for posting on the PC version of Instagram
 - Output JPEG files are kept under 9MB by default (Instagram's upload limit is around 10MB).
 - Margin size can be changed with an argument (default: 100).
 - Reads camera/lens info plus shooting parameters (F-number, shutter speed, ISO) from EXIF metadata and overlays them as two lines in the bottom margin (enabled by default, disable with `--no-label`).
+  - The camera/lens line is set in a semibold dark gray, the exposure line in a lighter gray, with slight letter spacing and thin vertical dividers between items (e.g. `f/2.8 | 1/250s | ISO 400`).
 
 ## Usage
 

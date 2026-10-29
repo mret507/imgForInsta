@@ -21,6 +21,15 @@ If a file path is given and it's an image, only that file will be processed.
 If no path is given, the script directory is used.
 """
 
+# ラベル内の項目区切り（描画時は細い縦線に置き換える）
+LABEL_SEP = ' | '
+# 行ごとのスタイル (フォントの太さ, 文字色RGB)。行数がこれを超える場合は最後のスタイルを使う
+_LABEL_STYLES = [('semibold', (40, 40, 40)), ('light', (125, 125, 125))]
+_LABEL_SEP_COLOR = (200, 200, 200)
+_LABEL_TRACKING = 0.06  # 字間（フォントサイズ比）
+_LABEL_SEP_GAP = 0.8    # 区切り線の左右の間隔（フォントサイズ比）
+
+
 def get_exif_label(input_file: str) -> Optional[List[str]]:
     """EXIFからラベル行のリストを返す。
     1行目: カメラメーカー+モデル と レンズモデル
@@ -43,9 +52,13 @@ def get_exif_label(input_file: str) -> Optional[List[str]]:
             make  = str(exif.get(271, '')).strip()
             model = str(exif.get(272, '')).strip()
             lens  = str(ifd_exif.get(42036, '')).strip()
-            camera = f"{make} {model}".strip() if make else model
+            # Model にメーカー名が含まれる場合（例: "Canon EOS R5"）は Make を重ねない
+            if make and not model.lower().startswith(make.split()[0].lower()):
+                camera = f"{make} {model}".strip()
+            else:
+                camera = model or make
             line1_parts = [p for p in [camera, lens] if p]
-            line1 = '  '.join(line1_parts) if line1_parts else None
+            line1 = LABEL_SEP.join(line1_parts) if line1_parts else None
 
             # F値・シャッタースピード・ISO感度
             fnumber  = ifd_exif.get(33437)  # FNumber
@@ -58,7 +71,7 @@ def get_exif_label(input_file: str) -> Optional[List[str]]:
             line2_parts: List[str] = []
             if fnumber is not None:
                 try:
-                    line2_parts.append(f"F{float(fnumber):g}")
+                    line2_parts.append(f"f/{float(fnumber):g}")
                 except Exception:
                     pass
             if exposure is not None:
@@ -72,10 +85,10 @@ def get_exif_label(input_file: str) -> Optional[List[str]]:
                     pass
             if iso is not None:
                 try:
-                    line2_parts.append(f"ISO{int(iso)}")
+                    line2_parts.append(f"ISO {int(iso)}")
                 except Exception:
                     pass
-            line2 = '  '.join(line2_parts) if line2_parts else None
+            line2 = LABEL_SEP.join(line2_parts) if line2_parts else None
 
             lines = [l for l in [line1, line2] if l]
             return lines if lines else None
@@ -83,26 +96,16 @@ def get_exif_label(input_file: str) -> Optional[List[str]]:
         return None
 
 
-def _measure_font_size(text: str, target_width: int) -> int:
-    """テキスト幅が target_width になるフォントサイズを計算して返す（描画なし）。"""
-    from PIL import Image, ImageDraw
-    font_size = max(16, int(target_width * 0.08))
-    img_tmp = Image.new('RGB', (1, 1))
-    draw = ImageDraw.Draw(img_tmp)
-    for _ in range(2):
-        font = _load_font(font_size)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        rw = bbox[2] - bbox[0]
-        if rw > 0:
-            font_size = max(16, int(font_size * target_width / rw))
-    return font_size
-
-
-def _load_font(size: int):
-    """指定サイズのTrueTypeフォントを返す。見つからない場合はPILデフォルトフォント。"""
+def _load_font(size: int, weight: str = 'regular'):
+    """指定サイズ・太さのTrueTypeフォントを返す。見つからない場合はPILデフォルトフォント。"""
+    # TODO: 設定値管理にする？
     from PIL import ImageFont
-    for path in [
-        "C:/Windows/Fonts/arial.ttf",
+    candidates = {
+        'semibold': ["C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/calibrib.ttf"],
+        'light':    ["C:/Windows/Fonts/segoeuisl.ttf", "C:/Windows/Fonts/calibril.ttf"],
+    }.get(weight, [])
+    for path in candidates + [
+        # "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/calibri.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
     ]:
@@ -113,40 +116,79 @@ def _load_font(size: int):
     return ImageFont.load_default()
 
 
+def _line_style(index: int) -> Tuple[str, Tuple[int, int, int]]:
+    return _LABEL_STYLES[min(index, len(_LABEL_STYLES) - 1)]
+
+
+def _segment_width(draw, text: str, font, tracking: float) -> float:
+    """字間 tracking(px) を加えたテキスト幅。"""
+    if not text:
+        return 0.0
+    return sum(draw.textlength(ch, font=font) for ch in text) + tracking * (len(text) - 1)
+
+
+def _line_width(draw, line: str, font, font_size: int) -> float:
+    """区切り線・字間込みで1行を描画したときの幅。"""
+    segments = line.split(LABEL_SEP)
+    tracking = font_size * _LABEL_TRACKING
+    width = sum(_segment_width(draw, seg, font, tracking) for seg in segments)
+    return width + (len(segments) - 1) * 2 * font_size * _LABEL_SEP_GAP
+
+
+def _measure_font_size(lines: List[str], target_width: int) -> int:
+    """最も幅の広い行が target_width になるフォントサイズを計算して返す（描画なし）。"""
+    from PIL import Image, ImageDraw
+    font_size = max(16, int(target_width * 0.08))
+    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    for _ in range(2):
+        rw = max(_line_width(draw, line, _load_font(font_size, _line_style(i)[0]), font_size)
+                 for i, line in enumerate(lines))
+        if rw > 0:
+            font_size = max(16, int(font_size * target_width / rw))
+    return font_size
+
+
 def draw_label(image: np.ndarray, lines: List[str], bottom_area: int, font_size: int = 0) -> np.ndarray:
-    """画像下部のbottom_area領域に複数行linesをグレーで中央揃え描画して返す。
+    """画像下部のbottom_area領域に複数行linesを中央揃え描画して返す。
+    1行目はセミボールドの濃いグレー、2行目以降はセミライトの淡いグレーで、字間を少し空ける。
+    LABEL_SEP で区切られた項目の間には細い縦線を描く。
     font_size が指定された場合はそのサイズを使用し、0の場合は最長行が画像幅の2/3に収まるよう自動計算する。"""
     from PIL import Image, ImageDraw
     h, w = image.shape[:2]
     pil_img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_img)
 
-    longest = max(lines, key=len) if lines else ''
     if font_size == 0:
-        target_text_width = int(w * 2 / 3)
-        font_size = max(16, int(w * 0.04))
-        for _ in range(2):
-            font = _load_font(font_size)
-            bbox = draw.textbbox((0, 0), longest, font=font)
-            rendered_w = bbox[2] - bbox[0]
-            if rendered_w > 0:
-                font_size = max(16, int(font_size * target_text_width / rendered_w))
+        font_size = _measure_font_size(lines, int(w * 2 / 3))
 
-    font = _load_font(font_size)
     line_gap = int(font_size * 0.4)
+    tracking = font_size * _LABEL_TRACKING
+    sep_gap = font_size * _LABEL_SEP_GAP
+    sep_width = max(1, round(font_size / 18))
 
-    sizes = []
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        sizes.append((bbox[2] - bbox[0], bbox[3] - bbox[1]))
-
-    total_h = sum(s[1] for s in sizes) + line_gap * max(0, len(lines) - 1)
-    y = h - bottom_area + (bottom_area - total_h) // 2
+    # 各行のフォント・インク上端/下端を求める（行ごとに太さが異なるため）
+    metrics = []
     for i, line in enumerate(lines):
-        tw, th = sizes[i]
-        x = max(0, (w - tw) // 2)
-        draw.text((x, y), line, fill=(80, 80, 80), font=font)
-        y += th + line_gap
+        weight, color = _line_style(i)
+        font = _load_font(font_size, weight)
+        _, top, _, bottom = draw.textbbox((0, 0), line.replace(LABEL_SEP, ' '), font=font)
+        metrics.append((font, color, top, bottom))
+
+    total_h = sum(m[3] - m[2] for m in metrics) + line_gap * max(0, len(lines) - 1)
+    y = h - bottom_area + (bottom_area - total_h) // 2
+    for line, (font, color, top, bottom) in zip(lines, metrics):
+        x = max(0.0, (w - _line_width(draw, line, font, font_size)) / 2)
+        for j, seg in enumerate(line.split(LABEL_SEP)):
+            if j > 0:
+                # 項目の区切りは文字の高さに合わせた細い縦線
+                sx = round(x + sep_gap)
+                draw.line([(sx, y), (sx, y + bottom - top)], fill=_LABEL_SEP_COLOR, width=sep_width)
+                x += 2 * sep_gap
+            for ch in seg:
+                draw.text((x, y - top), ch, fill=color, font=font)
+                x += draw.textlength(ch, font=font) + tracking
+            x -= tracking if seg else 0
+        y += bottom - top + line_gap
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
@@ -247,8 +289,7 @@ def save_square_image(input_file: str, output_dir: str, extra_margin: int = 100,
         h, w = image.shape[:2]
         max_dim = max(h, w)
         sq_width = max_dim + 2 * extra_margin
-        longest_line = max(exif_lines, key=len)
-        font_size = _measure_font_size(longest_line, int(sq_width * 2 / 3))
+        font_size = _measure_font_size(exif_lines, int(sq_width * 2 / 3))
         # 画像幅の 2% を上限として最終比率を決める
         font_size = max(8, min(font_size, int(sq_width * 0.02)))
         # 行数に応じた bottom_area (n行 + line_gap(0.4) + 上下パディング(1.2))
