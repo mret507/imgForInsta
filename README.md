@@ -1,6 +1,8 @@
 
 # imgForInsta
 
+English | [日本語](README.ja.md)
+
 Pad images to a fixed aspect ratio (square 1:1 by default, also 4:5 / 1.91:1 etc.) for posting on the PC version of Instagram.
 
 - Adds a margin of 100 pixels (default) to each side and pads the image to the chosen aspect ratio (`--ratio`, default 1:1).
