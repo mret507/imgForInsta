@@ -1,9 +1,10 @@
 
 # imgForInsta
 
-Resize and pad images to square (1:1) for posting on the PC version of Instagram.
+Pad images to a fixed aspect ratio (square 1:1 by default, also 4:5 / 1.91:1 etc.) for posting on the PC version of Instagram.
 
-- Adds a margin of 100 pixels (default) to each side, making the image square with white padding.
+- Adds a margin of 100 pixels (default) to each side and pads the image to the chosen aspect ratio (`--ratio`, default 1:1).
+- Background can be white (default), black, any `#RRGGBB` color, or a blurred copy of the photo (`--bg blur`).
 - Output JPEG files are kept under 9MB by default (Instagram's upload limit is around 10MB).
 - Margin size can be changed with an argument (default: 100).
 - Reads camera/lens info plus shooting parameters (F-number, shutter speed, ISO) from EXIF metadata and overlays them as two lines in the bottom margin (enabled by default, disable with `--no-label`).
@@ -16,7 +17,7 @@ Resize and pad images to square (1:1) for posting on the PC version of Instagram
 After setting up the venv, use `run.bat` for quick execution without manually activating the venv.
 
 ```batch
-run.bat [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N] [--no-label]
+run.bat [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N] [--no-label] [--ratio W:H] [--bg COLOR|blur] [--no-metadata]
 ```
 
 **Examples:**
@@ -33,10 +34,16 @@ run.bat [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--q
   run.bat "C:\path\to\images" -m 150
   ```
 
+- Portrait 4:5 with a blurred background (saved to `4_5_resized`):
+
+  ```batch
+  run.bat "C:\path\to\images" --ratio 4:5 --bg blur
+  ```
+
 ### Direct Python execution
 
 ```powershell
-python imgForInsta.py [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N] [--no-label]
+python imgForInsta.py [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max-size MB] [--quality-min N] [--no-label] [--ratio W:H] [--bg COLOR|blur] [--no-metadata]
 ```
 
 **Arguments and Defaults:**
@@ -47,6 +54,9 @@ python imgForInsta.py [<directory_or_file_path>] [-m MARGIN] [-w WORKERS] [--max
 - `--max-size`: Maximum output file size in MB. **Default:** 9
 - `--quality-min`: Minimum JPEG quality. **Default:** 10
 - `--no-label`: Disable camera/lens EXIF label in the bottom margin. Output filename gets a `_no-label` suffix. **Default:** label is shown
+- `--ratio`: Output aspect ratio as `W:H` (e.g. `1:1`, `4:5`, `1.91:1`) or a single number (width / height). The output folder is named after the ratio (e.g. `4_5_resized`). **Default:** `1:1` (output folder `square_resized`)
+- `--bg`: Background of the padded area: `white`, `black`, `#RRGGBB`, or `blur` (an enlarged, heavily blurred copy of the photo). **Default:** `white`
+- `--no-metadata`: Strip all metadata (EXIF and ICC profile) from the output. **Default:** EXIF metadata (camera, lens, exposure, date, ...) is kept and an sRGB ICC profile is embedded; GPS location data is always removed
 
 **Examples:**
 
@@ -85,13 +95,17 @@ This project is licensed under the MIT License. See the LICENSE file for details
 - Parallel processing (set workers with `-w`)
 - Progress bar with `tqdm`
 - Supports JPEG/JPG and HEIF/HEIC input (HEIF requires extra packages; see Requirements)
-- EXIF label: two lines drawn in the bottom white margin (disable with `--no-label`)
+- Selectable output aspect ratio (`--ratio`) and background (`--bg`: solid color or blurred photo)
+- Color management: JPEG inputs with a non-sRGB ICC profile (Display P3, Adobe RGB, ...) are converted to sRGB, and EXIF orientation is applied, so colors and rotation look right on Instagram
+- Metadata preservation (EXIF + sRGB ICC) by default with GPS stripped for privacy; disable with `--no-metadata`
+- EXIF label: two lines drawn in the bottom margin (disable with `--no-label`)
   - Line 1: camera make + model and lens model
   - Line 2: F-number, shutter speed, and ISO (e.g. `F2.8  1/250s  ISO400`)
-  - Font is auto-sized to fit the longest line within 2/3 of the image width, capped at 2% of the square width
-  - The original photo is only shifted up / the canvas is only expanded when the existing bottom margin is too small for the label; otherwise the photo stays centered at the same size. The top margin is always kept at least `--margin` pixels
+  - Font is auto-sized to fit the longest line within 2/3 of the canvas width, capped at 2% of the canvas width
+  - Text color adapts to the background: dark gray on light backgrounds, light gray on dark ones (e.g. `--bg black`)
+  - The original photo is only shifted up / the canvas is only expanded (on the bottom, plus left/right to keep the aspect ratio) when the existing bottom margin is too small for the label; otherwise the photo stays centered at the same size. The top margin is always kept at least `--margin` pixels
 - Folder selection dialog (Tkinter) when `path` is omitted
-- Handles non-ASCII (e.g. Japanese) paths on Windows by routing through `np.fromfile` / `cv2.imencode` instead of `cv2.imread` / `cv2.imwrite`
+- Handles non-ASCII (e.g. Japanese) paths on Windows (images are read and written through Pillow / Python file I/O instead of `cv2.imread` / `cv2.imwrite`)
 
 ## Requirements
 
@@ -125,7 +139,7 @@ This repository includes a `requirements.txt` generated from the project venv. U
 
 ## Notes
 
-- Output files are saved in a `square_resized` folder next to the input directory or file.
+- Output files are saved in a folder next to the input directory or file: `square_resized` for 1:1, otherwise named after the ratio with `:` replaced by `_` (e.g. `4_5_resized`, `1.91_1_resized`).
 - HEIF/HEIC inputs are always converted to JPEG for output.
 - Use `py -3` or your Python 3 interpreter if `python` is not Python 3 on your system.
 - When `--no-label` is specified, the output filename gets a `_no-label` suffix to distinguish it from the labeled version.
